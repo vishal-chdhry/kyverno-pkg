@@ -55,6 +55,7 @@ func generateTLS(server string, caCert *x509.Certificate, caKey *rsa.PrivateKey,
 		config.ServiceName,
 		fmt.Sprintf("%s.%s", config.ServiceName, config.Namespace),
 		inClusterServiceName(config),
+		inClusterSvcName(config),
 	}
 	var ips []net.IP
 	if server != "" {

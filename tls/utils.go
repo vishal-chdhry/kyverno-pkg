@@ -84,6 +84,10 @@ func inClusterServiceName(config *Config) string {
 	return config.ServiceName + "." + config.Namespace + ".svc"
 }
 
+func inClusterSvcName(config *Config) string {
+	return "svc." + config.ServiceName
+}
+
 func GenerateTLSPairSecretName(config *Config) string {
 	return inClusterServiceName(config) + ".tls-pair"
 }
