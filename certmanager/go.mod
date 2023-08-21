@@ -5,7 +5,7 @@ go 1.20
 replace github.com/vishal-chdhry/kyverno-pkg/tls => ../tls
 
 require (
-	github.com/vishal-chdhry/kyverno-pkg/tls v0.0.0-00010101000000-000000000000
+	github.com/vishal-chdhry/kyverno-pkg/tls v0.0.1
 	go.uber.org/zap v1.25.0
 	k8s.io/api v0.28.0
 	k8s.io/apimachinery v0.28.0
