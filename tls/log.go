@@ -1,11 +1,11 @@
 package tls
 
 import (
-	"go.uber.org/zap"
+	"github.com/go-logr/logr"
 )
 
-var logger *zap.SugaredLogger
+var logger logr.Logger
 
 func init() {
-	logger = zap.NewNop().Sugar()
+	logger = logr.Discard()
 }

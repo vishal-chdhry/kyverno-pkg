@@ -6,7 +6,7 @@ import (
 	"crypto/x509"
 	"time"
 
-	"go.uber.org/zap"
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -28,6 +28,12 @@ type CertValidator interface {
 	ValidateCert(context.Context) (bool, error)
 }
 
+type TLSCerts struct {
+	Cert *x509.Certificate
+
+	Key *rsa.PrivateKey
+}
+
 type CertRenewer interface {
 	// RenewCA renews the CA certificate if needed
 	RenewCA(context.Context) error
@@ -39,12 +45,13 @@ type CertRenewer interface {
 // webhook configurations and webhook server
 // renews RootCA at the given interval
 type certRenewer struct {
-	logger              *zap.SugaredLogger
+	logger              logr.Logger
 	client              interfacev1.SecretInterface
 	certRenewalInterval time.Duration
 	caValidityDuration  time.Duration
 	tlsValidityDuration time.Duration
 	config              *Config
+	informer            *chan TLSCerts
 
 	server string
 }
@@ -56,25 +63,25 @@ type Config struct {
 
 // NewCertRenewer returns an instance of CertRenewer
 func NewCertRenewer(
-	zlogger *zap.SugaredLogger,
+	log logr.Logger,
 	client interfacev1.SecretInterface,
 	certRenewalInterval,
 	caValidityDuration,
 	tlsValidityDuration time.Duration,
 	server string,
 	config *Config,
+	informer *chan TLSCerts,
 ) *certRenewer {
-	if zlogger != nil {
-		logger = zlogger
-	}
+	logger = log
 	return &certRenewer{
-		logger:              zlogger,
+		logger:              log,
 		client:              client,
 		certRenewalInterval: certRenewalInterval,
 		caValidityDuration:  caValidityDuration,
 		tlsValidityDuration: tlsValidityDuration,
 		server:              server,
 		config:              config,
+		informer:            informer,
 	}
 }
 
@@ -82,35 +89,35 @@ func NewCertRenewer(
 func (c *certRenewer) RenewCA(ctx context.Context) error {
 	secret, key, certs, err := c.decodeCASecret(ctx)
 	if err != nil && !apierrors.IsNotFound(err) {
-		c.logger.Error(err, "failed to read CA")
+		c.logger.V(2).Error(err, "failed to read CA")
 		return err
 	}
 	now := time.Now()
 	certs = removeExpiredCertificates(now, certs...)
 	if !allCertificatesExpired(now.Add(5*c.certRenewalInterval), certs...) {
-		c.logger.Info("CA certificate does not need to be renewed")
+		c.logger.V(2).Info("CA certificate does not need to be renewed")
 		return nil
 	}
 
 	if secret != nil && secret.Type != corev1.SecretTypeTLS {
-		c.logger.Info("CA secret type is not TLS, we're going to delete it and regenrate one")
+		c.logger.V(2).Info("CA secret type is not TLS, we're going to delete it and regenrate one")
 		err := c.client.Delete(ctx, secret.Name, metav1.DeleteOptions{})
 		if err != nil {
-			c.logger.Error(err, "failed to delete CA secret")
+			c.logger.V(2).Error(err, "failed to delete CA secret")
 		}
 		return err
 	}
 	caKey, caCert, err := generateCA(key, c.caValidityDuration)
 	if err != nil {
-		c.logger.Error(err, "failed to generate CA")
+		c.logger.V(2).Error(err, "failed to generate CA")
 		return err
 	}
 	certs = append(certs, caCert)
 	if err := c.writeCASecret(ctx, caKey, certs...); err != nil {
-		c.logger.Error(err, "failed to write CA")
+		c.logger.V(2).Error(err, "failed to write CA")
 		return err
 	}
-	c.logger.Info("CA was renewed")
+	c.logger.V(2).Info("CA was renewed")
 	return nil
 }
 
@@ -118,38 +125,38 @@ func (c *certRenewer) RenewCA(ctx context.Context) error {
 func (c *certRenewer) RenewTLS(ctx context.Context) error {
 	_, caKey, caCerts, err := c.decodeCASecret(ctx)
 	if err != nil {
-		c.logger.Error(err, "failed to read CA")
+		c.logger.V(2).Error(err, "failed to read CA")
 		return err
 	}
 	secret, _, cert, err := c.decodeTLSSecret(ctx)
 	if err != nil && !apierrors.IsNotFound(err) {
-		c.logger.Error(err, "failed to read TLS")
+		c.logger.V(2).Error(err, "failed to read TLS")
 		return err
 	}
 	now := time.Now()
 	if cert != nil && !allCertificatesExpired(now.Add(5*c.certRenewalInterval), cert) {
-		c.logger.Info("TLS certificate does not need to be renewed")
+		c.logger.V(2).Info("TLS certificate does not need to be renewed")
 		return nil
 	}
 
 	if secret != nil && secret.Type != corev1.SecretTypeTLS {
-		c.logger.Info("TLS secret type is not TLS, we're going to delete it and regenrate one")
+		c.logger.V(2).Info("TLS secret type is not TLS, we're going to delete it and regenrate one")
 		err := c.client.Delete(ctx, secret.Name, metav1.DeleteOptions{})
 		if err != nil {
-			c.logger.Error(err, "failed to delete TLS secret")
+			c.logger.V(2).Error(err, "failed to delete TLS secret")
 		}
 		return err
 	}
 	tlsKey, tlsCert, err := generateTLS(c.server, caCerts[len(caCerts)-1], caKey, c.tlsValidityDuration, c.config)
 	if err != nil {
-		c.logger.Error(err, "failed to generate TLS")
+		c.logger.V(2).Error(err, "failed to generate TLS")
 		return err
 	}
 	if err := c.writeTLSSecret(ctx, tlsKey, tlsCert); err != nil {
-		c.logger.Error(err, "failed to write TLS")
+		c.logger.V(2).Error(err, "failed to write TLS")
 		return err
 	}
-	c.logger.Info("TLS was renewed")
+	c.logger.V(2).Info("TLS was renewed")
 	return nil
 }
 
@@ -217,10 +224,10 @@ func (c *certRenewer) decodeTLSSecret(ctx context.Context) (*corev1.Secret, *rsa
 }
 
 func (c *certRenewer) writeSecret(ctx context.Context, name string, key *rsa.PrivateKey, certs ...*x509.Certificate) error {
-	logger := c.logger.With("name", name, "namespace", c.config.Namespace)
+	logger := c.logger.V(2).WithValues("name", name, "namespace", c.config.Namespace)
 	secret, err := c.getSecret(ctx, name)
 	if err != nil && !apierrors.IsNotFound(err) {
-		logger.Error(err, "failed to get CA secret")
+		logger.V(2).Error(err, "failed to get CA secret")
 		return err
 	}
 	if secret == nil {
@@ -239,17 +246,17 @@ func (c *certRenewer) writeSecret(ctx context.Context, name string, key *rsa.Pri
 	}
 	if secret.ResourceVersion == "" {
 		if _, err := c.client.Create(ctx, secret, metav1.CreateOptions{}); err != nil {
-			logger.Error(err, "failed to update secret")
+			logger.V(2).Error(err, "failed to update secret")
 			return err
 		} else {
-			c.logger.Info("secret created")
+			c.logger.V(2).Info("secret created")
 		}
 	} else {
 		if _, err := c.client.Update(ctx, secret, metav1.UpdateOptions{}); err != nil {
-			logger.Error(err, "failed to update secret")
+			logger.V(2).Error(err, "failed to update secret")
 			return err
 		} else {
-			logger.Info("secret updated")
+			logger.V(2).Info("secret updated")
 		}
 	}
 	return nil
@@ -262,5 +269,10 @@ func (c *certRenewer) writeCASecret(ctx context.Context, key *rsa.PrivateKey, ce
 
 // writeTLSSecret Writes the pair of TLS certificate and key to the specified secret.
 func (c *certRenewer) writeTLSSecret(ctx context.Context, key *rsa.PrivateKey, cert *x509.Certificate) error {
+	certs := TLSCerts{
+		Cert: cert,
+		Key:  key,
+	}
+	*c.informer <- certs
 	return c.writeSecret(ctx, GenerateTLSPairSecretName(c.config), key, cert)
 }
