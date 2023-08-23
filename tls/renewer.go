@@ -69,7 +69,6 @@ func NewCertRenewer(
 	tlsValidityDuration time.Duration,
 	server string,
 	config *Config,
-	informer *chan TLSCerts,
 ) *certRenewer {
 	logger = log
 	return &certRenewer{
