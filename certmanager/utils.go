@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"go.uber.org/zap"
+	"github.com/go-logr/logr"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
@@ -24,7 +24,7 @@ type (
 	EnqueueFuncT[T any] func(T) error
 )
 
-func retryFunc(ctx context.Context, retryInterval, timeout time.Duration, logger *zap.SugaredLogger, msg string, run func(context.Context) error) func() error {
+func retryFunc(ctx context.Context, retryInterval, timeout time.Duration, logger logr.Logger, msg string, run func(context.Context) error) func() error {
 	return func() error {
 		ctx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
@@ -35,7 +35,7 @@ func retryFunc(ctx context.Context, retryInterval, timeout time.Duration, logger
 			select {
 			case <-registerTicker.C:
 				if err = run(ctx); err != nil {
-					logger.Info(msg, "reason", err.Error())
+					logger.V(2).Info(msg, "reason", err.Error())
 				} else {
 					return nil
 				}
@@ -56,21 +56,21 @@ func AddEventHandlers(informer cache.SharedInformer, a addFunc, u updateFunc, d 
 	})
 }
 
-func AddDefaultEventHandlers(logger *zap.SugaredLogger, informer cache.SharedInformer, queue workqueue.RateLimitingInterface) EnqueueFunc {
+func AddDefaultEventHandlers(logger logr.Logger, informer cache.SharedInformer, queue workqueue.RateLimitingInterface) EnqueueFunc {
 	return AddKeyedEventHandlers(logger, informer, queue, MetaNamespaceKey)
 }
 
-func AddKeyedEventHandlers(logger *zap.SugaredLogger, informer cache.SharedInformer, queue workqueue.RateLimitingInterface, parseKey keyFunc) EnqueueFunc {
+func AddKeyedEventHandlers(logger logr.Logger, informer cache.SharedInformer, queue workqueue.RateLimitingInterface, parseKey keyFunc) EnqueueFunc {
 	enqueueFunc := LogError(logger, Parse(parseKey, Queue(queue)))
 	AddEventHandlers(informer, AddFunc(logger, enqueueFunc), UpdateFunc(logger, enqueueFunc), DeleteFunc(logger, enqueueFunc))
 	return enqueueFunc
 }
 
-func LogError[K any](logger *zap.SugaredLogger, inner EnqueueFuncT[K]) EnqueueFuncT[K] {
+func LogError[K any](logger logr.Logger, inner EnqueueFuncT[K]) EnqueueFuncT[K] {
 	return func(obj K) error {
 		err := inner(obj)
 		if err != nil {
-			logger.Error(err, "failed to compute key name", "obj", obj)
+			logger.V(2).Error(err, "failed to compute key name", "obj", obj)
 		}
 		return err
 	}
@@ -87,30 +87,30 @@ func MetaNamespaceKey(obj interface{}) (interface{}, error) {
 	return cache.MetaNamespaceKeyFunc(obj)
 }
 
-func AddFunc(logger *zap.SugaredLogger, enqueue EnqueueFunc) addFunc {
+func AddFunc(logger logr.Logger, enqueue EnqueueFunc) addFunc {
 	return func(obj interface{}) {
 		if err := enqueue(obj); err != nil {
-			logger.Error(err, "failed to enqueue object", "obj", obj)
+			logger.V(2).Error(err, "failed to enqueue object", "obj", obj)
 		}
 	}
 }
 
-func UpdateFunc(logger *zap.SugaredLogger, enqueue EnqueueFunc) updateFunc {
+func UpdateFunc(logger logr.Logger, enqueue EnqueueFunc) updateFunc {
 	return func(old, obj interface{}) {
 		oldMeta := old.(metav1.Object)
 		objMeta := obj.(metav1.Object)
 		if oldMeta.GetResourceVersion() != objMeta.GetResourceVersion() {
 			if err := enqueue(obj); err != nil {
-				logger.Error(err, "failed to enqueue object", "obj", obj)
+				logger.V(2).Error(err, "failed to enqueue object", "obj", obj)
 			}
 		}
 	}
 }
 
-func DeleteFunc(logger *zap.SugaredLogger, enqueue EnqueueFunc) deleteFunc {
+func DeleteFunc(logger logr.Logger, enqueue EnqueueFunc) deleteFunc {
 	return func(obj interface{}) {
 		if err := enqueue(obj); err != nil {
-			logger.Error(err, "failed to enqueue object", "obj", obj)
+			logger.V(2).Error(err, "failed to enqueue object", "obj", obj)
 		}
 	}
 }

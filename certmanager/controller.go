@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/vishal-chdhry/kyverno-pkg/tls"
-	"go.uber.org/zap"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -27,7 +27,7 @@ type CertManagerController interface {
 }
 
 type controller struct {
-	logger *zap.SugaredLogger
+	logger logr.Logger
 
 	renewer tls.CertRenewer
 
@@ -44,7 +44,7 @@ type controller struct {
 }
 
 func NewController(
-	logger *zap.SugaredLogger,
+	logger logr.Logger,
 	caInformer corev1informers.SecretInformer,
 	tlsInformer corev1informers.SecretInformer,
 	certRenewer tls.CertRenewer,
@@ -73,7 +73,7 @@ func (c *controller) Run(ctx context.Context, workers int) {
 			Name:      tls.GenerateTLSPairSecretName(c.tlsConfig),
 		},
 	}); err != nil {
-		c.logger.Error(err, "failed to enqueue secret", "name", tls.GenerateTLSPairSecretName(c.tlsConfig))
+		c.logger.V(2).Error(err, "failed to enqueue secret", "name", tls.GenerateTLSPairSecretName(c.tlsConfig))
 	}
 	if err := c.caEnqueue(&corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
@@ -81,12 +81,12 @@ func (c *controller) Run(ctx context.Context, workers int) {
 			Name:      tls.GenerateRootCASecretName(c.tlsConfig),
 		},
 	}); err != nil {
-		c.logger.Error(err, "failed to enqueue CA secret", "name", tls.GenerateRootCASecretName(c.tlsConfig))
+		c.logger.V(2).Error(err, "failed to enqueue CA secret", "name", tls.GenerateRootCASecretName(c.tlsConfig))
 	}
 	run(ctx, c.logger, ControllerName, time.Second, c.queue, workers, maxRetries, c.reconcile, c.ticker)
 }
 
-func (c *controller) reconcile(ctx context.Context, logger *zap.SugaredLogger, key, namespace, name string) error {
+func (c *controller) reconcile(ctx context.Context, logger logr.Logger, key, namespace, name string) error {
 	if namespace != c.tlsConfig.Namespace {
 		return nil
 	}
@@ -96,7 +96,7 @@ func (c *controller) reconcile(ctx context.Context, logger *zap.SugaredLogger, k
 	return c.renewCertificates(ctx)
 }
 
-func (c *controller) ticker(ctx context.Context, logger *zap.SugaredLogger) {
+func (c *controller) ticker(ctx context.Context, logger logr.Logger) {
 	certsRenewalTicker := time.NewTicker(tls.CertRenewalInterval)
 	defer certsRenewalTicker.Stop()
 	for {
@@ -107,11 +107,11 @@ func (c *controller) ticker(ctx context.Context, logger *zap.SugaredLogger) {
 				if err == nil {
 					for _, secret := range list {
 						if err := c.caEnqueue(secret); err != nil {
-							logger.Error(err, "failed to enqueue secret", "name", secret.Name)
+							logger.V(2).Error(err, "failed to enqueue secret", "name", secret.Name)
 						}
 					}
 				} else {
-					logger.Error(err, "falied to list secrets")
+					logger.V(2).Error(err, "falied to list secrets")
 				}
 			}
 			{
@@ -119,11 +119,11 @@ func (c *controller) ticker(ctx context.Context, logger *zap.SugaredLogger) {
 				if err == nil {
 					for _, secret := range list {
 						if err := c.tlsEnqueue(secret); err != nil {
-							logger.Error(err, "failed to enqueue secret", "name", secret.Name)
+							logger.V(2).Error(err, "failed to enqueue secret", "name", secret.Name)
 						}
 					}
 				} else {
-					logger.Error(err, "falied to list secrets")
+					logger.V(2).Error(err, "falied to list secrets")
 				}
 			}
 		case <-ctx.Done():
