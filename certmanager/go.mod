@@ -1,12 +1,12 @@
-module github.com/vishal-chdhry/kyverno-pkg/certmanager
+module github.com/kyverno/pkg/certmanager
 
 go 1.20
 
-replace github.com/vishal-chdhry/kyverno-pkg/tls => ../tls
+replace github.com/kyverno/pkg/tls => ../tls
 
 require (
 	github.com/go-logr/logr v1.2.4
-	github.com/vishal-chdhry/kyverno-pkg/tls v0.0.5
+	github.com/kyverno/pkg/tls v0.0.5
 	k8s.io/api v0.28.0
 	k8s.io/apimachinery v0.28.0
 	k8s.io/client-go v0.28.0

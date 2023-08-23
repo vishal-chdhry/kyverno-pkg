@@ -1,4 +1,4 @@
-module github.com/vishal-chdhry/kyverno-pkg/tls
+module github.com/kyverno/pkg/tls
 
 go 1.20
 
