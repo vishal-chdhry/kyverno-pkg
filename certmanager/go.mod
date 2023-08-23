@@ -6,7 +6,7 @@ replace github.com/vishal-chdhry/kyverno-pkg/tls => ../tls
 
 require (
 	github.com/go-logr/logr v1.2.4
-	github.com/vishal-chdhry/kyverno-pkg/tls v0.0.3
+	github.com/vishal-chdhry/kyverno-pkg/tls v0.0.4
 	k8s.io/api v0.28.0
 	k8s.io/apimachinery v0.28.0
 	k8s.io/client-go v0.28.0
