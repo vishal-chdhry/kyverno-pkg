@@ -128,7 +128,7 @@ func (c *certRenewer) RenewTLS(ctx context.Context) error {
 		c.logger.V(2).Error(err, "failed to read CA")
 		return err
 	}
-	secret, _, cert, err := c.decodeTLSSecret(ctx)
+	secret, key, cert, err := c.decodeTLSSecret(ctx)
 	if err != nil && !apierrors.IsNotFound(err) {
 		c.logger.V(2).Error(err, "failed to read TLS")
 		return err
@@ -136,6 +136,11 @@ func (c *certRenewer) RenewTLS(ctx context.Context) error {
 	now := time.Now()
 	if cert != nil && !allCertificatesExpired(now.Add(5*c.certRenewalInterval), cert) {
 		c.logger.V(2).Info("TLS certificate does not need to be renewed")
+		certs := TLSCerts{
+			Cert: cert,
+			Key:  key,
+		}
+		*c.informer <- certs
 		return nil
 	}
 
