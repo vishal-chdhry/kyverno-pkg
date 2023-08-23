@@ -51,7 +51,6 @@ type certRenewer struct {
 	caValidityDuration  time.Duration
 	tlsValidityDuration time.Duration
 	config              *Config
-	informer            *chan TLSCerts
 
 	server string
 }
@@ -81,7 +80,6 @@ func NewCertRenewer(
 		tlsValidityDuration: tlsValidityDuration,
 		server:              server,
 		config:              config,
-		informer:            informer,
 	}
 }
 
@@ -128,7 +126,7 @@ func (c *certRenewer) RenewTLS(ctx context.Context) error {
 		c.logger.V(2).Error(err, "failed to read CA")
 		return err
 	}
-	secret, key, cert, err := c.decodeTLSSecret(ctx)
+	secret, _, cert, err := c.decodeTLSSecret(ctx)
 	if err != nil && !apierrors.IsNotFound(err) {
 		c.logger.V(2).Error(err, "failed to read TLS")
 		return err
@@ -136,11 +134,6 @@ func (c *certRenewer) RenewTLS(ctx context.Context) error {
 	now := time.Now()
 	if cert != nil && !allCertificatesExpired(now.Add(5*c.certRenewalInterval), cert) {
 		c.logger.V(2).Info("TLS certificate does not need to be renewed")
-		certs := TLSCerts{
-			Cert: cert,
-			Key:  key,
-		}
-		*c.informer <- certs
 		return nil
 	}
 
@@ -274,10 +267,5 @@ func (c *certRenewer) writeCASecret(ctx context.Context, key *rsa.PrivateKey, ce
 
 // writeTLSSecret Writes the pair of TLS certificate and key to the specified secret.
 func (c *certRenewer) writeTLSSecret(ctx context.Context, key *rsa.PrivateKey, cert *x509.Certificate) error {
-	certs := TLSCerts{
-		Cert: cert,
-		Key:  key,
-	}
-	*c.informer <- certs
 	return c.writeSecret(ctx, GenerateTLSPairSecretName(c.config), key, cert)
 }
