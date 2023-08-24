@@ -2,10 +2,13 @@ package certmanager
 
 import (
 	"context"
+	"crypto/tls"
+	"encoding/base64"
+	"errors"
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/kyverno/pkg/tls"
+	tlsMgr "github.com/kyverno/pkg/tls"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -24,12 +27,15 @@ const (
 type CertManagerController interface {
 	// Run starts the controller
 	Run(context.Context, int)
+
+	// GetCertificate can be used to fetch secrets in tls.Config
+	GetCertificate(*tls.ClientHelloInfo) (*tls.Certificate, error)
 }
 
 type controller struct {
 	logger logr.Logger
 
-	renewer tls.CertRenewer
+	renewer tlsMgr.CertRenewer
 
 	// listers
 	caLister  corev1listers.SecretLister
@@ -40,15 +46,15 @@ type controller struct {
 	caEnqueue  EnqueueFunc
 	tlsEnqueue EnqueueFunc
 
-	tlsConfig *tls.Config
+	tlsConfig *tlsMgr.Config
 }
 
 func NewController(
 	logger logr.Logger,
 	caInformer corev1informers.SecretInformer,
 	tlsInformer corev1informers.SecretInformer,
-	certRenewer tls.CertRenewer,
-	config *tls.Config,
+	certRenewer tlsMgr.CertRenewer,
+	config *tlsMgr.Config,
 ) CertManagerController {
 	queue := workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), ControllerName)
 	c := controller{
@@ -70,34 +76,62 @@ func (c *controller) Run(ctx context.Context, workers int) {
 	if err := c.tlsEnqueue(&corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: c.tlsConfig.Namespace,
-			Name:      tls.GenerateTLSPairSecretName(c.tlsConfig),
+			Name:      tlsMgr.GenerateTLSPairSecretName(c.tlsConfig),
 		},
 	}); err != nil {
-		c.logger.V(2).Error(err, "failed to enqueue secret", "name", tls.GenerateTLSPairSecretName(c.tlsConfig))
+		c.logger.V(2).Error(err, "failed to enqueue secret", "name", tlsMgr.GenerateTLSPairSecretName(c.tlsConfig))
 	}
 	if err := c.caEnqueue(&corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
 			Namespace: c.tlsConfig.Namespace,
-			Name:      tls.GenerateRootCASecretName(c.tlsConfig),
+			Name:      tlsMgr.GenerateRootCASecretName(c.tlsConfig),
 		},
 	}); err != nil {
-		c.logger.V(2).Error(err, "failed to enqueue CA secret", "name", tls.GenerateRootCASecretName(c.tlsConfig))
+		c.logger.V(2).Error(err, "failed to enqueue CA secret", "name", tlsMgr.GenerateRootCASecretName(c.tlsConfig))
 	}
 	run(ctx, c.logger, ControllerName, time.Second, c.queue, workers, maxRetries, c.reconcile, c.ticker)
+}
+
+func (c *controller) GetCertificate(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+	secret, err := c.tlsLister.Secrets(c.tlsConfig.Namespace).Get(tlsMgr.GenerateTLSPairSecretName(c.tlsConfig))
+	if err != nil {
+		return nil, err
+	} else if secret == nil {
+		return nil, errors.New("tls secret not found")
+	} else if secret.Type != corev1.SecretTypeTLS {
+		return nil, errors.New("secret is not a TLS secret")
+	}
+
+	tlscert, err := base64.StdEncoding.DecodeString(string(secret.Data[corev1.TLSCertKey]))
+	if err != nil {
+		return nil, err
+	}
+
+	tlskey, err := base64.StdEncoding.DecodeString(string(secret.Data[corev1.TLSPrivateKeyKey]))
+	if err != nil {
+		return nil, err
+	}
+
+	cert, err := tls.X509KeyPair(tlscert, tlskey)
+	if err != nil {
+		return nil, err
+	}
+
+	return &cert, nil
 }
 
 func (c *controller) reconcile(ctx context.Context, logger logr.Logger, key, namespace, name string) error {
 	if namespace != c.tlsConfig.Namespace {
 		return nil
 	}
-	if name != tls.GenerateTLSPairSecretName(c.tlsConfig) && name != tls.GenerateRootCASecretName(c.tlsConfig) {
+	if name != tlsMgr.GenerateTLSPairSecretName(c.tlsConfig) && name != tlsMgr.GenerateRootCASecretName(c.tlsConfig) {
 		return nil
 	}
 	return c.renewCertificates(ctx)
 }
 
 func (c *controller) ticker(ctx context.Context, logger logr.Logger) {
-	certsRenewalTicker := time.NewTicker(tls.CertRenewalInterval)
+	certsRenewalTicker := time.NewTicker(tlsMgr.CertRenewalInterval)
 	defer certsRenewalTicker.Stop()
 	for {
 		select {
