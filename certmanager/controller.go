@@ -3,7 +3,6 @@ package certmanager
 import (
 	"context"
 	"crypto/tls"
-	"encoding/base64"
 	"errors"
 	"time"
 
@@ -102,17 +101,7 @@ func (c *controller) GetCertificate(*tls.ClientHelloInfo) (*tls.Certificate, err
 		return nil, errors.New("secret is not a TLS secret")
 	}
 
-	tlscert, err := base64.StdEncoding.DecodeString(string(secret.Data[corev1.TLSCertKey]))
-	if err != nil {
-		return nil, err
-	}
-
-	tlskey, err := base64.StdEncoding.DecodeString(string(secret.Data[corev1.TLSPrivateKeyKey]))
-	if err != nil {
-		return nil, err
-	}
-
-	cert, err := tls.X509KeyPair(tlscert, tlskey)
+	cert, err := tls.X509KeyPair(secret.Data[corev1.TLSCertKey], secret.Data[corev1.TLSPrivateKeyKey])
 	if err != nil {
 		return nil, err
 	}
